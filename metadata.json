@@ -1,0 +1,14 @@
+{
+  "name": "mas4u - Luxury Fintech platform",
+  "description": "A high-end financial ecosystem for accounting firms and clients, featuring AI-powered document extraction (OCR), business dashboards, and community features.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "AI OCR",
+    "Financial Dashboards",
+    "Business CRM",
+    "B2B Marketplace"
+  ]
+}

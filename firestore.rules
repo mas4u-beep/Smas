@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Helper for checking admin (lookup based on a trusted path)
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // 1. User Rules
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.fullName is string && data.fullName.size() <= 150
+            && data.email == request.auth.token.email
+            && data.role in ['client', 'staff', 'admin']
+            && data.onboardingCompleted is bool;
+      }
+
+      allow get: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'businessName', 'businessType', 'onboardingCompleted'])
+      ) || isAdmin();
+    }
+
+    // 2. Chat Rules
+    match /chats/{chatId}/{document=**} {
+      // Users can only read/write their own chat thread with the office
+      allow read, write: if isOwner(chatId) || isAdmin();
+    }
+
+    // 3. Document Rules
+    match /documents/{docId} {
+      function isValidDoc(data) {
+        return data.userId == request.auth.uid
+            && data.fileName is string && data.fileName.size() <= 255
+            && data.status in ['pending', 'processing', 'completed', 'error'];
+      }
+
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && (isOwner(resource.data.userId) || isAdmin());
+      allow create: if isVerified() && isValidDoc(incoming());
+      allow update: if isVerified() && (
+        (isOwner(existing().userId) && incoming().diff(existing()).affectedKeys().hasOnly(['fileName'])) ||
+        isAdmin()
+      );
+      allow delete: if isOwner(existing().userId) || isAdmin();
+    }
+
+    // 4. Notification Rules
+    match /notifications/{notifId} {
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow get, update: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isSignedIn(); // Allow app to trigger alerts during specific logic
+    }
+
+    // 4. Report Rules
+    match /reports/{reportId} {
+      allow read: if isOwner(existing().userId) || isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 5. Professional Rules (Publicish to signed in users)
+    match /professionals/{proId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
